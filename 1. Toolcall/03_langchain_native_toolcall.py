@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 DEFAULT_USER_PROMPT = "帮我查一下 Beijing 的天气和时间"
 
@@ -53,9 +54,9 @@ def get_time(city: str) -> str:
 def load_llm() -> ChatOpenAI:
     load_dotenv(Path(__file__).resolve().parents[1] / ".env")
     return ChatOpenAI(
-        model=os.getenv("MODEL", "qwen3.5:cloud"),
-        base_url=os.getenv("BASE_URL", "http://localhost:11434/v1/"),
-        api_key=os.getenv("API_KEY", "ollama"),
+        model=os.getenv("MODEL", "agnes-2.0-flash"),
+        base_url=os.getenv("BASE_URL", "https://apihub.agnes-ai.com/v1"),
+        api_key=SecretStr(os.getenv("API_KEY", "sk-FnTaAp4YjsAwaPVhyySOVhhr4S4LiIpdHfw6p5uYhZqYFHKI")),
         temperature=0,
     )
 
@@ -82,24 +83,43 @@ def main() -> None:
     print("\nLangChain 解析出的 tool_calls:")
     print(response.tool_calls)
 
-    for tool_call in response.tool_calls:
-        print("\n准备执行工具:")
-        print(f"tool_name = {tool_call['name']}")
-        print(f"tool_args = {tool_call['args']}")
-
-        result = get_weather.invoke(tool_call["args"])
-        print("\n工具执行结果:")
-        print(result)
-
+    # 如果模型决定调用工具
+    if response.tool_calls:
+        # 1. 首先，把模型的这个决定（AIMessage）加入历史，只能加一次！
         messages.append(response)
-        messages.append(
-            ToolMessage(
-                content=result,
-                name=tool_call["name"],
-                tool_call_id=tool_call["id"],
+        
+        # 2. 准备一个工具映射字典，方便根据名字找到对应的函数
+        available_tools = {
+            "get_weather": get_weather,
+            "get_time": get_time,
+        }
+        
+        # 3. 遍历所有的工具调用
+        for tool_call in response.tool_calls:
+            tool_name = tool_call["name"]
+            tool_args = tool_call["args"]
+            
+            print(f"\n准备执行工具: {tool_name}, 参数: {tool_args}")
+            
+            # 根据名字找到对应的工具执行，而不是写死
+            selected_tool = available_tools.get(tool_name)
+            if selected_tool:
+                result = selected_tool.invoke(tool_args)
+            else:
+                result = f"未找到名为 {tool_name} 的工具"
+                
+            print(f"工具执行结果: {result}")
+            
+            # 4. 把每个工具的执行结果作为 ToolMessage 追加进去
+            messages.append(
+                ToolMessage(
+                    content=result,
+                    name=tool_name,
+                    tool_call_id=tool_call["id"], # 必须带上 id，模型才知道哪个结果对应哪个调用
+                )
             )
-        )
-
+            
+    # 5. 最后，把包含所有工具结果的 messages 再次交给模型做总结
     if response.tool_calls:
         final_response = llm.invoke(messages)
         print("\n把工具结果交回模型后的最终回答:")

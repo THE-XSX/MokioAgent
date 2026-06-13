@@ -11,6 +11,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, To
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
+from pydantic import SecretStr
 
 DEFAULT_TASK = "请检查 inbox，把 a.txt 移动到 archive，然后告诉我整理后的目录变化。"
 WORKSPACE = Path(__file__).resolve().parent / "demo_workspace"
@@ -70,9 +71,9 @@ def move_file(source: str, target: str) -> str:
 def load_llm() -> ChatOpenAI:
     load_dotenv(Path(__file__).resolve().parents[1] / ".env")
     return ChatOpenAI(
-        model=os.getenv("MODEL", "qwen3.6-flash"),
-        base_url=os.getenv("BASE_URL"),
-        api_key=os.getenv("API_KEY"),
+        model=os.getenv("MODEL", "agnes-2.0-flash"),
+        base_url=os.getenv("BASE_URL", "https://apihub.agnes-ai.com/v1"),
+        api_key=SecretStr(os.getenv("API_KEY", "sk-FnTaAp4YjsAwaPVhyySOVhhr4S4LiIpdHfw6p5uYhZqYFHKI")),
         temperature=0,
     )
 
@@ -96,7 +97,7 @@ def main() -> None:
 
     tools = [list_files, move_file]
     tool_map = {item.name: item for item in tools}
-    llm = load_llm().bind_tools(tools)
+    llm = load_llm().bind_tools(tools)#绑定工具
 
     def agent_node(state: AgentState) -> AgentState:
         print("\n[agent] 模型思考")
